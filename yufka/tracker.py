@@ -19,6 +19,10 @@ class TrackerResponse:
         return None
 
     @property
+    def complete(self) -> int:
+        return self.response.get(b"complete", 0)
+
+    @property
     def interval(self):
         return self.response.get(b"interval", 0)
 
