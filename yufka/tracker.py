@@ -1,11 +1,11 @@
-import random
-from struct import unpack
 import aiohttp
+import random
 import logging
 import socket
+from struct import unpack
 from urllib.parse import urlencode
 
-from . import bencoding
+from yufka import bencoding
 
 
 class TrackerResponse:
@@ -19,12 +19,12 @@ class TrackerResponse:
         return None
 
     @property
-    def complete(self) -> int:
-        return self.response.get(b"complete", 0)
+    def interval(self) -> int:
+        return self.response.get(b"interval", 0)
 
     @property
-    def interval(self):
-        return self.response.get(b"interval", 0)
+    def complete(self) -> int:
+        return self.response.get(b"complete", 0)
 
     @property
     def incomplete(self) -> int:
@@ -34,12 +34,12 @@ class TrackerResponse:
     def peers(self):
         peers = self.response[b"peers"]
         if type(peers) == list:
-            logging.debug("Peers are in list format")
+            logging.debug("Dictionary model peers are returned by tracker")
+            raise NotImplementedError()
+        else:
+            logging.debug("Binary model peers are returned by tracker")
             peers = [peers[i : i + 6] for i in range(0, len(peers), 6)]
-            return [
-                (socket.inet_ntoa(peer[:4]), int.from_bytes(peer[4:], "big"))
-                for peer in peers
-            ]
+            return [(socket.inet_ntoa(p[:4]), _decode_port(p[4:])) for p in peers]
 
     def __str__(self):
         return (
@@ -58,7 +58,7 @@ class TrackerResponse:
 class Tracker:
     def __init__(self, torrent):
         self.torrent = torrent
-        self.peer_id = _calculate_per_id()
+        self.peer_id = _calculate_peer_id()
         self.http_client = aiohttp.ClientSession()
 
     async def connect(self, first: bool = None, uploaded: int = 0, downloaded: int = 0):
@@ -68,16 +68,21 @@ class Tracker:
             "port": 6889,
             "uploaded": uploaded,
             "downloaded": downloaded,
-            "left": self.torrent.length - downloaded,
+            "left": self.torrent.total_size - downloaded,
             "compact": 1,
         }
         if first:
             params["event"] = "started"
         url = self.torrent.announce + "?" + urlencode(params)
-        logging.info("Connecting to tracker: %s", url)
+        logging.info("Connecting to tracker at: " + url)
+
         async with self.http_client.get(url) as response:
             if not response.status == 200:
-                raise ConnectionError("Tracker response status is not 200")
+                raise ConnectionError(
+                    "Unable to connect to tracker: status code {}".format(
+                        response.status
+                    )
+                )
             data = await response.read()
             self.raise_for_error(data)
             return TrackerResponse(bencoding.Decoder(data).decode())
@@ -85,15 +90,15 @@ class Tracker:
     def close(self):
         self.http_client.close()
 
-    def raise_for_error(self, tracker_response: bytes):
+    def raise_for_error(self, tracker_response):
         try:
-            message = tracker_response[b"failure reason"].decode("utf-8")
+            message = tracker_response.decode("utf-8")
             if "failure" in message:
                 raise ConnectionError(
                     "Unable to connect to tracker: {}".format(message)
                 )
         except UnicodeDecodeError:
-            return
+            pass
 
     def _construct_tracker_parameters(self):
         return {
@@ -102,22 +107,14 @@ class Tracker:
             "port": 6889,
             "uploaded": 0,
             "downloaded": 0,
-            "left": self.torrent.length,
+            "left": 0,
             "compact": 1,
         }
 
 
-def _calculate_per_id():
-    """
-    Read more:
-        https://wiki.theory.org/BitTorrentSpecification#peer_id
-    """
+def _calculate_peer_id():
     return "-PC0001-" + "".join([str(random.randint(0, 9)) for _ in range(12)])
 
 
 def _decode_port(port):
-    """
-    Converts a 32-bit packed binary port number to int
-    """
-    # Convert from C style big-endian encoded as unsigned short
     return unpack(">H", port)[0]
