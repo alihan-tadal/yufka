@@ -61,8 +61,17 @@ class Torrent:
 
     @property
     def output_file(self):
-        pass
+        return self.meta_info[b"info"][b"name"].decode("utf-8")
 
     @property
     def __str__(self):
-        pass
+        return (
+            "Filename: {0}\nAnnounce: {1}\n"
+            "Piece length: {2}\n"
+            "Total size: {3}\n".format(
+                self.meta_info[b"info"][b"name"].decode("utf-8"),
+                self.meta_info[b"info"][b"length"].decode("utf-8"),
+                self.meta_info[b"announce"],
+                self.info_hash,
+            )
+        )
